@@ -16,6 +16,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 
@@ -29,6 +30,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var wifiManager: WifiManager
     private lateinit var wifiAdapter: WifiAdapter
 
+    @Suppress("MissingPermission")
     private val scanReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == "android.net.wifi.SCAN_RESULTS_AVAILABLE_ACTION") {
@@ -75,11 +77,12 @@ class MainActivity : AppCompatActivity() {
 
         // Register broadcast receiver
         val filter = IntentFilter("android.net.wifi.SCAN_RESULTS_AVAILABLE_ACTION")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(scanReceiver, filter, RECEIVER_EXPORTED)
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            RECEIVER_EXPORTED
         } else {
-            registerReceiver(scanReceiver, filter)
+            ContextCompat.RECEIVER_NOT_EXPORTED
         }
+        registerReceiver(scanReceiver, filter, flags)
     }
 
     override fun onDestroy() {

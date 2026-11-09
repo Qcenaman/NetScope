@@ -1,4 +1,4 @@
-package com.example.wifiscanner
+package com.example.netscope
 
 import android.net.wifi.WifiManager
 import android.os.Bundle

@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.wifiscanner"
+    namespace = "com.example.netscope"
     compileSdk = 35
 
     defaultConfig {

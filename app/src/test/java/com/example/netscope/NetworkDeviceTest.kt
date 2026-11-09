@@ -1,4 +1,4 @@
-package com.example.wifiscanner
+package com.example.netscope
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue

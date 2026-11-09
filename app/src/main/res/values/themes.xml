@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.WiFiScanner" parent="Theme.MaterialComponents.DayNight.DarkActionBar">
+    <style name="Theme.NetScope" parent="Theme.MaterialComponents.DayNight.DarkActionBar">
         <item name="colorPrimary">@color/purple_500</item>
         <item name="colorPrimaryVariant">@color/wifi_dark</item>
         <item name="colorOnPrimary">@color/white</item>

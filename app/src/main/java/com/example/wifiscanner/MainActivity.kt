@@ -240,8 +240,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateConnectionStatus() {
         val info = wifiManager.connectionInfo
-        if (info.ssid != "NULL" && info.ssid.isNotEmpty()) {
-            val ssid = info.ssid.trim('"')
+        val ssid = info.ssid.trim('"')
+        val bssid = info.bssid ?: ""
+        val isRealConnection = ssid != "NULL" && ssid.isNotEmpty() && ssid != "<unknown ssid>" && bssid != "00:00:00:00:00:00"
+        if (isRealConnection) {
             tvCurrentWifi.text = "Connected: $ssid"
             btnNetworkScan.visibility = Button.VISIBLE
         } else {

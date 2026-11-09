@@ -34,7 +34,7 @@
         android:layout_height="wrap_content"
         android:text="Not connected to WiFi"
         android:textSize="14sp"
-        android:textColor="@color/purple_500"
+        android:textColor="#6200EE"
         android:layout_marginBottom="8dp" />
 
     <Button
@@ -48,6 +48,7 @@
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/rvWifiList"
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="0dp"
+        android:layout_weight="1" />
 
 </LinearLayout>

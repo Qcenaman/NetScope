@@ -3,7 +3,6 @@ package com.qcenaman.netscope.net
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.LinkProperties
-import android.net.wifi.WifiManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -15,7 +14,6 @@ import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.net.Socket
 import java.util.concurrent.Semaphore
-import java.util.concurrent.TimeUnit
 
 data class CurrentNetwork(
     val ipAddress: String,
@@ -29,28 +27,22 @@ data class CurrentNetwork(
 class NetworkScanner(context: Context) {
 
     private val context = context.applicationContext
-    private val wifiManager =
-        context.getSystemService(Context.WIFI_SERVICE) as WifiManager
 
     /**
      * Detects the subnet the phone is currently on.
-     * Uses the active network's link properties for the prefix and gateway,
-     * falling back to the wlan0 interface with a /24 assumption.
+     * Uses the active network's link properties for the IP, prefix and
+     * gateway (WifiManager#getConnectionInfo is deprecated), falling back
+     * to the wlan0 interface with a /24 assumption.
      */
     suspend fun detectCurrentNetwork(): CurrentNetwork? {
         return withContext(Dispatchers.IO) {
             runCatching {
-                @Suppress("DEPRECATION")
-                val info = wifiManager.connectionInfo
-                val ipInt = info?.ipAddress ?: 0
-                if (ipInt != 0) {
-                    val ip = fromNetworkOrder(ipInt)
-                    val linkProps = activeLinkProperties()
-                    val prefix = linkProps?.linkAddresses
-                        ?.firstOrNull { it.address is Inet4Address }
-                        ?.prefixLength
-                        ?.takeIf { it in 8..30 }
-                        ?: 24
+                val linkProps = activeLinkProperties()
+                val addr = linkProps?.linkAddresses
+                    ?.firstOrNull { it.address is Inet4Address && !it.address.isLoopbackAddress }
+                if (addr != null) {
+                    val ip = addr.address.hostAddress
+                    val prefix = addr.prefixLength.takeIf { it in 8..30 } ?: 24
                     val gateway = linkProps?.routes
                         ?.firstOrNull { it.isDefaultRoute }
                         ?.gateway
@@ -90,20 +82,23 @@ class NetworkScanner(context: Context) {
         return buildNetwork(ip.hostAddress, 24, defaultGateway(ip.hostAddress, 24))
     }
 
-    private fun fromNetworkOrder(v: Int): String =
-        "${v and 0xFF}.${(v ushr 8) and 0xFF}.${(v ushr 16) and 0xFF}.${(v ushr 24) and 0xFF}"
-
     /**
-     * Ping sweep over the given host list using the system ping binary.
+     * Single-pass device discovery: TCP-connect probes of common ports over
+     * the whole host list. A host with at least one open port counts as
+     * alive. Returns a map of alive host to its open ports.
+     *
+     * The system ping binary is not usable from app sandboxes (SELinux),
+     * so port reachability is the liveness signal.
      */
-    suspend fun pingSweep(
+    suspend fun sweep(
         hosts: List<String>,
         concurrency: Int = 32,
+        timeoutMs: Int = 400,
         onProgress: (done: Int, total: Int) -> Unit
-    ): List<String> {
+    ): Map<String, List<Int>> {
         return withContext(Dispatchers.IO) {
             val semaphore = Semaphore(concurrency)
-            val alive = java.util.Collections.synchronizedList(mutableListOf<String>())
+            val results = java.util.Collections.synchronizedMap(mutableMapOf<String, List<Int>>())
             val lock = Any()
             var done = 0
             coroutineScope {
@@ -111,7 +106,8 @@ class NetworkScanner(context: Context) {
                     async {
                         semaphore.acquire()
                         try {
-                            if (ping(host)) alive.add(host)
+                            val open = probePorts(host, timeoutMs)
+                            if (open.isNotEmpty()) results[host] = open
                         } finally {
                             semaphore.release()
                             synchronized(lock) {
@@ -122,42 +118,27 @@ class NetworkScanner(context: Context) {
                     }
                 }.awaitAll()
             }
-            alive
+            results
         }
     }
 
-    private fun ping(host: String): Boolean {
-        return try {
-            val process = ProcessBuilder("ping", "-c", "1", "-W", "1", host)
-                .redirectErrorStream(true)
-                .start()
-            val finished = process.waitFor(3, TimeUnit.SECONDS)
-            finished && process.exitValue() == 0
-        } catch (e: Exception) {
-            false
-        }
-    }
-
-    /** TCP connect scan of common ports; returns the open ones. */
-    suspend fun scanPorts(ip: String, timeoutMs: Int = 400): List<Int> {
-        return withContext(Dispatchers.IO) {
-            coroutineScope {
-                COMMON_PORTS.map { port ->
-                    async {
+    private suspend fun probePorts(ip: String, timeoutMs: Int): List<Int> {
+        return coroutineScope {
+            COMMON_PORTS.map { port ->
+                async {
+                    try {
+                        val socket = Socket()
                         try {
-                            val socket = Socket()
-                            try {
-                                socket.connect(InetSocketAddress(ip, port), timeoutMs)
-                                port
-                            } finally {
-                                socket.close()
-                            }
-                        } catch (e: Exception) {
-                            null
+                            socket.connect(InetSocketAddress(ip, port), timeoutMs)
+                            port
+                        } finally {
+                            socket.close()
                         }
+                    } catch (e: Exception) {
+                        null
                     }
-                }.awaitAll().filterNotNull()
-            }
+                }
+            }.awaitAll().filterNotNull()
         }
     }
 

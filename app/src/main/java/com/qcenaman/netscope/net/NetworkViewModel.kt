@@ -45,24 +45,23 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
                     hosts = emptyList(),
                     progress = 0,
                     total = current.hosts.size,
-                    phase = "Pinging ${current.hosts.size} hosts…"
+                    phase = "Probing ${current.hosts.size} hosts…"
                 )
             }
-            val alive = scanner.pingSweep(current.hosts) { done, total ->
+            // Single pass: the sweep probes common ports on every host and
+            // returns the alive ones with their open ports.
+            val live = scanner.sweep(current.hosts) { done, total ->
                 _state.update { it.copy(progress = done, total = total) }
             }
             _state.update {
-                it.copy(phase = "Fingerprinting ${alive.size} live host(s)…")
+                it.copy(phase = "Resolving ${live.size} live host(s)…")
             }
-            val arp = ArpCache.parse(null)
             val hosts = withContext(Dispatchers.IO) {
-                alive.map { ip ->
-                    val ports = scanner.scanPorts(ip)
+                live.entries.map { (ip, ports) ->
                     val hostname = scanner.resolveHostname(ip)
                     HostInfo(
                         ip = ip,
                         hostname = hostname,
-                        mac = arp[ip],
                         openPorts = ports,
                         type = DeviceClassifier.classify(ip == current.gateway, ports.toSet(), hostname),
                         isGateway = ip == current.gateway

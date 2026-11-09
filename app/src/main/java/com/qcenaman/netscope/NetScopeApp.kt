@@ -1,5 +1,6 @@
 package com.qcenaman.netscope
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lan
@@ -32,29 +33,29 @@ fun NetScopeApp(permissionGranted: Boolean, onRequestPermission: () -> Unit) {
             containerColor = MaterialTheme.colorScheme.background,
             topBar = { TopAppBar(title = { Text("NetScope") }) }
         ) { padding ->
-            TabRow(selectedTabIndex = selectedTab) {
-                tabs.forEachIndexed { index, title ->
-                    Tab(
-                        selected = selectedTab == index,
-                        onClick = { selectedTab = index },
-                        icon = {
-                            Icon(
-                                imageVector = if (index == 0) Icons.Filled.Wifi else Icons.Filled.Lan,
-                                contentDescription = null
-                            )
-                        },
-                        text = { Text(title) }
-                    )
+            Column(Modifier.padding(padding)) {
+                TabRow(selectedTabIndex = selectedTab) {
+                    tabs.forEachIndexed { index, title ->
+                        Tab(
+                            selected = selectedTab == index,
+                            onClick = { selectedTab = index },
+                            icon = {
+                                Icon(
+                                    imageVector = if (index == 0) Icons.Filled.Wifi else Icons.Filled.Lan,
+                                    contentDescription = null
+                                )
+                            },
+                            text = { Text(title) }
+                        )
+                    }
                 }
-            }
-            val content = Modifier.padding(padding)
-            when (selectedTab) {
-                0 -> WifiScreen(
-                    modifier = content,
-                    permissionGranted = permissionGranted,
-                    onRequestPermission = onRequestPermission
-                )
-                else -> NetworkScreen(modifier = content)
+                when (selectedTab) {
+                    0 -> WifiScreen(
+                        permissionGranted = permissionGranted,
+                        onRequestPermission = onRequestPermission
+                    )
+                    else -> NetworkScreen()
+                }
             }
         }
     }

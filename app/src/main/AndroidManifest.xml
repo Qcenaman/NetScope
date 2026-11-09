@@ -6,15 +6,15 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Required for Wi-Fi scan results on Android 6-11 -->
-    <uses-permission
-        android:name="android.permission.ACCESS_FINE_LOCATION"
-        android:maxSdkVersion="30" />
-    <!-- Required for Wi-Fi scanning on Android 12+ -->
+    <!-- Required to read Wi-Fi scan results and the connected SSID on every
+         Android version. On Android 12+ the system redacts scan results and
+         the SSID (WifiManager.UNKNOWN_SSID) without this permission. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- Preferred Wi-Fi scanning permission on Android 13+ (API 33). -->
     <uses-permission
         android:name="android.permission.NEARBY_WIFI_DEVICES"
         android:usesPermissionFlags="neverForLocation"
-        tools:targetApi="s" />
+        tools:targetApi="tiramisu" />
 
     <uses-feature
         android:name="android.hardware.wifi"

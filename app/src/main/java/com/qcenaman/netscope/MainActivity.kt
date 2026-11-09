@@ -16,8 +16,10 @@ class MainActivity : ComponentActivity() {
     private val permissionState = mutableStateOf(false)
 
     private val permissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            permissionState.value = granted
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+            // Re-check the real grant state: the user may have granted only
+            // some of the requested permissions.
+            checkPermission()
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -33,19 +35,26 @@ class MainActivity : ComponentActivity() {
         checkPermission()
     }
 
-    private fun requiredPermission(): String =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            Manifest.permission.NEARBY_WIFI_DEVICES
-        } else {
-            Manifest.permission.ACCESS_FINE_LOCATION
+    /**
+     * Wi-Fi scan results and the connected SSID require ACCESS_FINE_LOCATION
+     * on every Android version (see WifiManager#getScanResults docs).
+     * NEARBY_WIFI_DEVICES is the preferred Wi-Fi permission on Android 13+
+     * and is requested alongside it.
+     */
+    private fun requiredPermissions(): List<String> = buildList {
+        add(Manifest.permission.ACCESS_FINE_LOCATION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            add(Manifest.permission.NEARBY_WIFI_DEVICES)
         }
+    }
 
     private fun checkPermission() {
-        permissionState.value =
-            ContextCompat.checkSelfPermission(this, requiredPermission()) == PackageManager.PERMISSION_GRANTED
+        permissionState.value = requiredPermissions().all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        }
     }
 
     private fun requestPermission() {
-        permissionLauncher.launch(requiredPermission())
+        permissionLauncher.launch(requiredPermissions().toTypedArray())
     }
 }

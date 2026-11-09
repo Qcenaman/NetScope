@@ -127,7 +127,8 @@ fun NetworkScreen(modifier: Modifier = Modifier, viewModel: NetworkViewModel = v
         if (state.finished && state.hosts.isEmpty()) {
             item {
                 Text(
-                    text = "No devices found. Some networks block ping traffic; try again later.",
+                    text = "No devices found. The scan probes common ports, so hosts that " +
+                        "close all of them stay invisible. Try again later.",
                     textAlign = TextAlign.Center,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -210,14 +211,6 @@ private fun HostRow(host: HostInfo) {
                 Text(
                     text = host.hostname,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            if (host.mac != null) {
-                Text(
-                    text = "MAC ${host.mac}",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }

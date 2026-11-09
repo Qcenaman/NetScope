@@ -14,7 +14,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 
 data class WifiUiState(
     val wifiEnabled: Boolean = false,
@@ -35,7 +34,7 @@ class WifiViewModel(application: Application) : AndroidViewModel(application) {
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
-                WifiManager.SCAN_RESULTS_AVAILABLE_ACTION -> refreshList()
+                WifiManager.SCAN_RESULTS_AVAILABLE_ACTION -> onScanResultsAvailable()
                 WifiManager.WIFI_STATE_CHANGED_ACTION ->
                     _state.update { it.copy(wifiEnabled = repository.isWifiEnabled()) }
                 android.net.ConnectivityManager.CONNECTIVITY_ACTION -> refreshStatus()
@@ -56,6 +55,7 @@ class WifiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        repository.unregisterScanCallback()
         runCatching { getApplication<Application>().unregisterReceiver(receiver) }
         super.onCleared()
     }
@@ -69,37 +69,63 @@ class WifiViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.scanning) return
         _state.update { it.copy(scanning = true, message = null) }
         viewModelScope.launch {
-            repository.startScan()
-            // Scan results arrive via SCAN_RESULTS_AVAILABLE; clear the spinner
-            // after a grace period in case the system throttles the request.
-            delay(3000)
-            _state.update { it.copy(scanning = false) }
-            refreshList()
+            try {
+                repository.registerScanCallback(::onScanResultsAvailable)
+            } catch (e: WifiScanException) {
+                repository.unregisterScanCallback()
+                _state.update { it.copy(scanning = false, message = e.message) }
+                return@launch
+            }
+            // New results arrive via the ScanResultsCallback (Android 11+)
+            // or the SCAN_RESULTS_AVAILABLE broadcast (Android 10). Clear
+            // the spinner after a grace period in case neither arrives.
+            delay(2000)
+            if (_state.value.scanning) {
+                repository.unregisterScanCallback()
+                _state.update { it.copy(scanning = false) }
+                refreshList(showErrors = true)
+            }
         }
+    }
+
+    /**
+     * New scan results landed. Runs on the main thread (callback executor
+     * and broadcast receiver both do), so the [scanning] guard is
+     * race-free.
+     */
+    private fun onScanResultsAvailable() {
+        if (!_state.value.scanning) return
+        repository.unregisterScanCallback()
+        _state.update { it.copy(scanning = false) }
+        refreshList(showErrors = true)
     }
 
     fun connect(ssid: String, password: String) {
         if (_state.value.connectingSsid != null) return
         viewModelScope.launch {
             _state.update { it.copy(connectingSsid = ssid, message = null) }
-            val registered = repository.connect(ssid, password)
+            val registered = try {
+                repository.connect(ssid, password)
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(connectingSsid = null, message = "Could not register network \"$ssid\"")
+                }
+                return@launch
+            }
             if (!registered) {
                 _state.update {
                     it.copy(connectingSsid = null, message = "Could not register network \"$ssid\"")
                 }
                 return@launch
             }
-            val connected = withTimeoutOrNull(20_000) {
-                while (true) {
-                    if (repository.isConnectedTo(ssid)) return@withTimeoutOrNull true
-                    delay(1500)
-                }
-            }
+            // Wait for the ConnectivityManager callback to confirm the
+            // connection instead of polling the SSID.
+            val confirmed = repository.awaitConnection(ssid, 30_000)
             _state.update {
                 it.copy(
                     connectingSsid = null,
-                    message = if (connected == true) "Connected to $ssid"
-                    else "Could not connect to $ssid"
+                    message = if (confirmed) "Connected to $ssid"
+                    else "Connection to $ssid was not confirmed. Check the system Wi-Fi dialog."
                 )
             }
             refreshAll()
@@ -122,14 +148,16 @@ class WifiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun refreshList() {
+    private fun refreshList(showErrors: Boolean = false) {
         viewModelScope.launch {
-            val networks = runCatching { repository.scanResults() }.getOrDefault(emptyList())
+            val result = runCatching { repository.scanResults() }
             _state.update {
                 it.copy(
-                    networks = networks,
+                    networks = result.getOrDefault(emptyList()),
                     currentSsid = repository.currentSsid(),
-                    currentIp = repository.currentIpAddress()
+                    currentIp = repository.currentIpAddress(),
+                    message = if (showErrors && result.isFailure) result.exceptionOrNull()?.message
+                    else it.message
                 )
             }
         }

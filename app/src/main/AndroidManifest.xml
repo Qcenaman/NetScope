@@ -9,6 +9,9 @@
     <!-- Required to read Wi-Fi scan results and the connected SSID on every
          Android version. On Android 12+ the system redacts scan results and
          the SSID (WifiManager.UNKNOWN_SSID) without this permission. -->
+    <!-- Both FINE and COARSE must be requested: on Android 12+ the user may
+         grant only "approximate", which the system maps to COARSE. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <!-- Preferred Wi-Fi scanning permission on Android 13+ (API 33). -->
     <uses-permission

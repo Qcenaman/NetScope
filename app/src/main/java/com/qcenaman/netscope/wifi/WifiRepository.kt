@@ -10,6 +10,7 @@ import android.net.wifi.WifiManager
 import android.net.wifi.WifiManager.ScanResultsCallback
 import android.net.wifi.WifiNetworkSuggestion
 import android.os.Build
+import android.util.Log
 import android.os.Handler
 import android.os.Looper
 import com.qcenaman.netscope.model.SecurityType
@@ -185,15 +186,21 @@ class WifiRepository(context: Context) {
     }
 
     private fun securityCapsFor(ssid: String): String {
-        return runCatching {
+        return try {
             wifiManager.scanResults
                 .firstOrNull { it.SSID == ssid }
                 ?.capabilities
                 ?: ""
-        }.getOrDefault("")
+        } catch (e: SecurityException) {
+            // Location permission was revoked; no capabilities available.
+            Log.w(TAG, "Cannot read Wi-Fi scan capabilities", e)
+            ""
+        }
     }
 
     companion object {
+        private const val TAG = "WifiRepository"
+
         /** BSSID Android substitutes for every redacted scan result. */
         private const val REDACTED_BSSID = "02:00:00:00:00:00"
     }

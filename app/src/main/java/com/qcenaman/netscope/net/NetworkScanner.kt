@@ -7,13 +7,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.net.Socket
-import java.util.concurrent.Semaphore
 
 data class CurrentNetwork(
     val ipAddress: String,
@@ -22,6 +23,12 @@ data class CurrentNetwork(
     val subnet: String,
     val broadcast: String,
     val hosts: List<String>
+)
+
+/** Minimal route info for gateway selection (testable without Android). */
+data class RouteInfoLite(
+    val gateway: InetAddress?,
+    val isDefaultRoute: Boolean
 )
 
 class NetworkScanner(context: Context) {
@@ -43,11 +50,12 @@ class NetworkScanner(context: Context) {
                 if (addr != null) {
                     val ip = addr.address.hostAddress
                     val prefix = addr.prefixLength.takeIf { it in 8..30 } ?: 24
-                    val gateway = linkProps?.routes
-                        ?.firstOrNull { it.isDefaultRoute }
-                        ?.gateway
-                        ?.hostAddress
-                        ?: defaultGateway(ip, prefix)
+                    val gateway = pickGateway(
+                        linkProps?.routes
+                            ?.map { RouteInfoLite(it.gateway, it.isDefaultRoute) }
+                            ?: emptyList(),
+                        defaultGateway(ip, prefix)
+                    )
                     buildNetwork(ip, prefix, gateway)
                 } else {
                     detectFromInterface()
@@ -83,48 +91,57 @@ class NetworkScanner(context: Context) {
     }
 
     /**
-     * Single-pass device discovery: TCP-connect probes of common ports over
-     * the whole host list. A host with at least one open port counts as
-     * alive. Returns a map of alive host to its open ports.
+     * Two-pass device discovery over the whole host list.
      *
-     * The system ping binary is not usable from app sandboxes (SELinux),
-     * so port reachability is the liveness signal.
+     * Pass 1 probes a small set of liveness ports on every host with a short
+     * timeout; a host with any open port counts as alive. Pass 2 probes the
+     * full common-port list on the (few) live hosts only.
+     *
+     * Host concurrency is bounded with a *suspending* semaphore, so the
+     * bounded IO pool is never blocked waiting for a permit (a blocking
+     * java.util.concurrent.Semaphore here starved the pool and stalled the
+     * scan). The system ping binary is not usable from app sandboxes
+     * (SELinux), so port reachability is the liveness signal.
      */
     suspend fun sweep(
         hosts: List<String>,
-        concurrency: Int = 32,
+        concurrency: Int = 64,
         timeoutMs: Int = 400,
         onProgress: (done: Int, total: Int) -> Unit
     ): Map<String, List<Int>> {
         return withContext(Dispatchers.IO) {
-            val semaphore = Semaphore(concurrency)
-            val results = java.util.Collections.synchronizedMap(mutableMapOf<String, List<Int>>())
+            val hostSemaphore = Semaphore(concurrency)
             val lock = Any()
             var done = 0
-            coroutineScope {
+
+            // Pass 1: quick liveness check on every host.
+            val alive = coroutineScope {
                 hosts.map { host ->
                     async {
-                        semaphore.acquire()
-                        try {
-                            val open = probePorts(host, timeoutMs)
-                            if (open.isNotEmpty()) results[host] = open
-                        } finally {
-                            semaphore.release()
+                        hostSemaphore.withPermit {
+                            val open = probePorts(host, LIVENESS_PORTS, LIVENESS_TIMEOUT_MS)
                             synchronized(lock) {
                                 done++
                                 onProgress(done, hosts.size)
                             }
+                            host to open
                         }
                     }
                 }.awaitAll()
+            }.filter { (_, open) -> open.isNotEmpty() }
+
+            // Pass 2: full port list on the live hosts only.
+            val results = mutableMapOf<String, List<Int>>()
+            for ((host, livenessPorts) in alive) {
+                results[host] = probePorts(host, COMMON_PORTS, timeoutMs).ifEmpty { livenessPorts }
             }
             results
         }
     }
 
-    private suspend fun probePorts(ip: String, timeoutMs: Int): List<Int> {
+    private suspend fun probePorts(ip: String, ports: List<Int>, timeoutMs: Int): List<Int> {
         return coroutineScope {
-            COMMON_PORTS.map { port ->
+            ports.map { port ->
                 async {
                     try {
                         val socket = Socket()
@@ -138,7 +155,7 @@ class NetworkScanner(context: Context) {
                         null
                     }
                 }
-            }.awaitAll().filterNotNull()
+            }.awaitAll().filterNotNull().sorted()
         }
     }
 
@@ -152,6 +169,27 @@ class NetworkScanner(context: Context) {
     }
 
     companion object {
+        /**
+         * Selects the IPv4 default gateway from the link's routes. On
+         * dual-stack links the IPv6 link-local route (e.g. fe80::2) can come
+         * first, but this app sweeps the IPv4 subnet, so the gateway must be
+         * the IPv4 one. Falls back to [fallback] when no IPv4 default route
+         * exists.
+         */
+        fun pickGateway(routes: List<RouteInfoLite>, fallback: String): String =
+            routes.firstOrNull { it.isDefaultRoute && it.gateway is Inet4Address }
+                ?.gateway?.hostAddress ?: fallback
+
+        /**
+         * Ports probed in the fast liveness pass. A hit on any of these marks
+         * a host as alive; only those hosts get the full [COMMON_PORTS] list.
+         * Covers routers, Windows/Linux hosts, NAS, cameras and printers.
+         */
+        val LIVENESS_PORTS = listOf(445, 139, 443, 80, 22, 3389, 53, 5900)
+
+        /** Shorter timeout for the liveness pass so dead hosts fail fast. */
+        const val LIVENESS_TIMEOUT_MS = 300
+
         val COMMON_PORTS = listOf(
             21, 22, 23, 53, 80, 110, 135, 139, 143, 443, 445, 554, 587, 631,
             993, 995, 1433, 1883, 2049, 3306, 3389, 5000, 5001, 5060, 5353,

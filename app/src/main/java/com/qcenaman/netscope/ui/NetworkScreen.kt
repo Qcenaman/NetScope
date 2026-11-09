@@ -26,6 +26,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +43,10 @@ import com.qcenaman.netscope.net.NetworkViewModel
 @Composable
 fun NetworkScreen(modifier: Modifier = Modifier, viewModel: NetworkViewModel = viewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+
+    // Detect the current network as soon as the tab is opened so the
+    // "Scan network" button is usable without a manual Refresh tap.
+    LaunchedEffect(Unit) { viewModel.refresh() }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
